@@ -56,6 +56,47 @@ def pad_node(node, n_max):
     }
 
 
+def write_dataset_readme(dataset_dir, n_max, n_graphs):
+    """README d'arborescence à la racine du dataset (auto-généré par collate)."""
+    name = os.path.basename(os.path.normpath(dataset_dir))
+    txt = f"""# `{name}/` — mosaïques LEGO fragmentées
+
+{n_graphs} mosaïques. Chaque `mosaic_<id>/` est une instance — l'**entrée** des
+étapes aval (YOLO / GNN / VLM).
+
+## Fichiers par mosaïque (`mosaic_<id>/`)
+| Fichier | Rôle |
+|---|---|
+| `target.png` | la mosaïque **complète** (objet reconstitué) |
+| `source.png` | les fragments **éclatés** sur fond blanc (≈ photo d'entrée) |
+| `source_yolo.txt` | labels **YOLO-Seg** (`classe x1 y1 … xn yn`, normalisés [0,1]) |
+| `source_yolo_viz.png` | overlay debug des labels (non utilisé par le GNN) |
+| `pieces.json` | debug : pièces LEGO détectées |
+| `graph_fragments.json` | **ENTRÉE GNN** : nœuds (features/fragment), zéro arête, sans `target_info` |
+| `graph_complete.json` | **CIBLE GNN** : mêmes nœuds + `target_info` (leak) + arêtes (mating graph) |
+| `gt_layout.json` | GT de reconstruction (polygones parfait/dégradé + pose) |
+| `gnn_ready.npz` | entrée GNN à **dimension fixe** (pad `n_max={n_max}` + masque) |
+| `degradation.md` | rapport de dégradation (0 si clean) |
+| `fragments/frag_XX.png` | crop alpha par fragment |
+
+Au niveau dataset : **`gnn_meta.json`** (`n_max={n_max}`, noms de features).
+
+## Schéma d'un nœud (`graph_fragments.json`)
+| Bloc | Contenu | Taille |
+|---|---|---|
+| `node_id` | identifiant stable (référencé par les arêtes) | — |
+| `gnn_input` | `[area, perimeter, R, G, B, bbox_w, bbox_h]` — domaine-agnostique | 7 |
+| `polygon_n_canonical` | contour en repère **PCA canonique** (invariant rotation) | `n_sides`×2 |
+| `side_features` | par côté `[length, angle, R, G, B]` | `n_sides`×5 |
+
+`n_sides` **variable** par nœud → paddé à `n_max={n_max}` + masque dans `gnn_ready.npz`.
+⚠️ **`target_info`** (dans `graph_complete`) = vérité terrain → ne **jamais** donner en entrée.
+
+_Régénéré par `mosaic2fragments/batch.py` + `features/collate.py`._
+"""
+    open(os.path.join(dataset_dir, "README.md"), "w", encoding="utf-8").write(txt)
+
+
 def build_dataset(dataset_dir, out_name="gnn_ready.npz"):
     """Étape COLLATE (post-YOLO / pré-GNN) : scanne tout le dataset, calcule n_max,
     pad+masque chaque nœud, et écrit par mosaïque un `gnn_ready.npz` (entrée GNN à
@@ -92,6 +133,7 @@ def build_dataset(dataset_dir, out_name="gnn_ready.npz"):
     }
     json.dump(meta, open(os.path.join(dataset_dir, "gnn_meta.json"), "w"),
               indent=2, ensure_ascii=False)
+    write_dataset_readme(dataset_dir, n_max, len(mosaics))
     return n_max
 
 
