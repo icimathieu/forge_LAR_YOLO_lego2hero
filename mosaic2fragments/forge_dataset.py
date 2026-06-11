@@ -932,9 +932,6 @@ def forge_one(target_path, out_dir, n_sides_range, n_frag_range, canvas_size,
         f"- Fragments manquants : {sorted(missing_ids) if missing_ids else 'aucun'}",
         f"- Total fragments : {len(fragment_data)} (présents dans l'input : {len(present)})",
         "",
-        "_Dégradation appliquée à l'INPUT seulement ; la GT (arêtes + polygon_raw parfait) "
-        "reste sur la partition intacte. L'aire perdue est une métrique dérivée, "
-        "pas un paramètre._", "",
     ]
     (out_dir / 'degradation.md').write_text("\n".join(report))
 

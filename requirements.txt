@@ -1,0 +1,9 @@
+# Dépendances lego2hero (Python 3). Installation :
+#   python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt
+numpy==2.2.6
+Pillow==12.0.0
+opencv-python==4.13.0.92
+shapely==2.1.2          # optionnel (clip de sécurité reco-B) ; sans lui, fallback gracieux
+networkx==3.5
+datasets==4.3.0         # source d'images wikiart en streaming (forge_LAR_2mosaic/wikiart.py)
+huggingface_hub==1.4.1  # upload de dataset vers le Hub (tools/hf_upload.py)
