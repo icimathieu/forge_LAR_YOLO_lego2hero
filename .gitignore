@@ -1,0 +1,21 @@
+# Données personnelles / privées — exclues du versionnage (décision 08/06/2026)
+contexte/
+notes_perso.txt
+journal_perso.md          # journal de bord / état de l'art (ex-readme.md), local uniquement
+
+# Sorties / données générées (lourdes) — TOUT output/ est hors du repo public
+# (dataset/, dataset_degraded/, 100mosaic4mathias/, etc.). Régénérable via les scripts.
+output/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
+.claude
+CLAUDE.md
+
