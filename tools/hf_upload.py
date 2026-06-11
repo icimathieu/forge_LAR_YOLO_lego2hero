@@ -30,6 +30,8 @@ def parse_args():
     p.add_argument("--private", action="store_true", help="dataset privé (défaut : public)")
     p.add_argument("--token", default=None, help="token HF (sinon : huggingface-cli login / HF_TOKEN)")
     p.add_argument("--commit", default="upload via tools/hf_upload.py", help="message de commit Hub")
+    p.add_argument("--path-in-repo", default=None,
+                   help="sous-dossier cible dans le repo (ex: clean) → plusieurs dossiers dans 1 dataset")
     p.add_argument("--allow-patterns", nargs="*", default=None,
                    help="ne pousser que ces motifs (ex: '*.json' '*.png')")
     return p.parse_args()
@@ -42,6 +44,7 @@ def main():
     api.create_repo(repo_id=a.repo_id, repo_type="dataset",
                     private=a.private, exist_ok=True)
     api.upload_folder(folder_path=a.folder, repo_id=a.repo_id, repo_type="dataset",
+                      path_in_repo=a.path_in_repo,
                       commit_message=a.commit, allow_patterns=a.allow_patterns)
     print(f"OK → https://huggingface.co/datasets/{a.repo_id}")
 
