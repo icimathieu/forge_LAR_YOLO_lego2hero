@@ -26,18 +26,22 @@
 
 ## À faire
 
-### Forge (NOUS)
+### Forge (ICI)
 - 🚧 **DAFNE B** : `--frag-distribution {voronoi, clusters}` (découpe à tailles inégales = durcissement)
 - 🚧 **DAFNE D** : parasites/distracteurs (fragments d'autres mosaïques à rejeter) — plus tard
 - ⏳ Re-collate local `output/balanced/L*` (le générateur de README a changé)
 
-### YOLO (NOUS)
+### YOLO (ICI)
 - 🚧 Entraînement **YOLO-Seg** sur `source.png` + `source_yolo.txt` — pas commencé
 - 🚧 Split train/val (`yolo/`) + jitter d'augmentation
 
-### GNN (équipe : Mathias)
+### GNN (Mathias)
 - 🚧 **5 modèles, un par palier** (n_max différent par palier → pas de fine-tuning cross-palier avec la repré pad+masque actuelle) + scoring comparé L0→L4 (la métrique doit décroître avec la difficulté)
 - 🚧 Choix représentation : pad n_max+masque (actuel) vs **encodeur n_max-agnostique** (set-encoder/PointNet, ou k keypoints fixes type ReassembleNet) — lèverait la contrainte n_max + nécessaire pour le réel
+
+### VLM (Charles & Manon)
+- jsp trop ce que vous allez faire, il y a moins de contraintes...
+
 
 ### Transfert / fine-tuning — datasets existants (cibles aval)
 - **RePAIR** (NeurIPS 2024) — fresques réelles, 121 objets / 957 fragments. **2D déjà en local** (`python_avance_CVG/FromLegoToHero/2fetchFORGE/2D_Fragments/`). Notre benchmark. <https://repairproject.github.io/RePAIR_dataset/>
