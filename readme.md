@@ -1,10 +1,5 @@
 # lego2hero
 
-Chaîne de génération de données pour la **reconstitution d'objets fragmentés** :
-`forge_LAR_2mosaic` (image → mosaïque LEGO) → `mosaic2fragments` (mosaïque →
-fragments + graphes) → **YOLO-Seg** → `features` (post-YOLO / pré-GNN, partagé
-synthétique↔réel) → GNN.
-
 ## Pipeline
 
 ```
@@ -51,10 +46,9 @@ synthétique↔réel) → GNN.
 ```
 
 `features` est **partagé** : sur le synthétique il consomme la GT, sur le réel il
-consomme les masques détectés par YOLO — même code, donc schéma aligné par
-construction (transfert LEGO → fresque).
+consomme les masques détectés par YOLO — même code.
 
-### Paliers du curriculum (difficulté croissante)
+### Paliers de dégradation (difficulté croissante)
 
 Driver `scripts/mosaic2fragments/curriculum.py` → `output/<frag-distribution>/<palier>/`.
 **Mêmes mosaïques de base à tous les paliers** (design apparié : seule la difficulté change).
@@ -140,7 +134,7 @@ Au niveau dataset : **`gnn_meta.json`** (`n_max`, noms de features).
 | `polygon_n_canonical` | contour en repère **PCA canonique** (invariant en rotation) | `n_sides`×2 |
 | `side_features` | par côté `[length, angle, R, G, B]` | `n_sides`×5 |
 
-`n_sides` est **variable** par nœud → côté GNN : pad à `n_max` + masque (cf. `gnn_ready.npz`).
+`n_sides` est **variable** par nœud → côté GNN : pad à `n_max` + masque (cf. `gnn_ready.npz`). Nécessaire pour GNN (dimension fixe == nombre de sommets fixe) SAUF à rendre GNN sommets-agnostique...
 
 ## Arêtes (cible) — `graph_complete.json`
 `edges` : `src`/`dst` (node_id) + `features` `[shared_length, mean_angle, n_segments]`
