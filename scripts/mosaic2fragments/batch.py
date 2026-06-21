@@ -28,12 +28,18 @@ def main():
     p.add_argument('--n-frag-max', type=int, default=15)
     p.add_argument('--canvas-w', type=int, default=3500)
     p.add_argument('--canvas-h', type=int, default=3500)
-    p.add_argument('--no-viz', action='store_true',
-                   help='Skip generating source_yolo_viz.png overlays')
+    p.add_argument('--debug', action='store_true',
+                   help='écrit les fichiers DEBUG (pieces.json + source_yolo_viz.png) ; OFF par défaut')
     p.add_argument('--name-from-input', action='store_true',
                    help="Nomme le dossier mosaic_<id> d'après le PNG d'entrée "
                         "(canvas_mosaic_<id>.png) au lieu de mosaic_000 séquentiel "
                         "→ noms uniques (uuid) préservés en sortie")
+    p.add_argument('--no-rotation', action='store_true',
+                   help='Curriculum L1 : fragments éclatés SANS rotation (translation seule)')
+    p.add_argument('--placement', choices=['scatter', 'explode'], default='scatter',
+                   help='explode = curriculum L0 : vue éclatée (positions relatives gardées)')
+    p.add_argument('--frag-distribution', choices=['balanced', 'compact'], default='balanced',
+                   help='balanced (défaut) ou compact (~rectangulaire, moins de sommets)')
     p.add_argument('--erode-px-min', type=int, default=0)
     p.add_argument('--erode-px-max', type=int, default=0)
     p.add_argument('--holes-min', type=int, default=0)
@@ -67,8 +73,12 @@ def main():
             stud_size=None,
             seed=seed,
             degrade=degrade,
+            rotate=not args.no_rotation,
+            placement=args.placement,
+            frag_distribution=args.frag_distribution,
+            debug=args.debug,
         )
-        if not args.no_viz:
+        if args.debug:
             visualize(sample_dir)
 
 

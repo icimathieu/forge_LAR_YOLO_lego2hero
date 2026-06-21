@@ -19,8 +19,8 @@ def parse_args():
     p.add_argument("--grid", type=int, default=96, help="studs par côté (48/64/96/100/128)")
     p.add_argument("--stud-size", type=int, default=40, help="px par stud (≥40)")
     p.add_argument("--joint-px", type=int, default=None, help="largeur du joint (défaut ~3)")
-    p.add_argument("--mode", choices=["tile", "plate", "brick"], default="tile",
-                   help="jeu de pièces LEGO (tile par défaut, max 2×6 ; plate = jusqu'à 4×4/4×10)")
+    p.add_argument("--mode", choices=["tile", "plate", "brick", "mono"], default="tile",
+                   help="jeu de pièces LEGO (tile par défaut ; mono = 1×1 seul, ultracompact)")
     p.add_argument("--big-plates", action="store_true",
                    help="réactive 4×8/4×10 (décochées par défaut sur le site)")
     return p.parse_args()

@@ -5,8 +5,8 @@ Inputs: a canvas_mosaic.png produced by lego-art-remix (variable-tile option).
 Outputs (per mosaic, in <out_dir>/mosaic_XXX/):
     target.png             — copy of the input mosaic
     source.png             — fragments exploded on a white canvas (YOLO-Seg input)
-    source_yolo.txt        — YOLO-Seg polygons, one line per fragment
-    pieces.json            — detected LEGO pieces (grid bbox + sampled color)
+    source_yolo.txt        — YOLO-Seg polygons, one line per fragment (THE YOLO ground truth)
+    pieces.json            — detected LEGO pieces (debug only, read nowhere) — opt-in via --debug
     graph_complete.json    — N nodes (fragment features) + adjacency edges (target)
     graph_fragments.json   — same N nodes, zero edges (GNN input)
     fragments/frag_XX.png  — per-fragment alpha crop in target frame
@@ -344,6 +344,79 @@ def fragment_pieces(piece_graph, k):
     return assigned
 
 
+def fragment_pieces_compact(piece_graph, pieces, k):
+    """Region growing biaisé COMPACITÉ — `--frag-distribution compact`.
+
+    Comme fragment_pieces, mais à chaque pas le fragment ajoute la pièce-frontière
+    qui **maximise le remplissage de sa bbox** (cellules remplies / aire bbox) →
+    fragments ~rectangulaires, silhouettes régulières, MOINS de coins concaves
+    → `n_max` plus petit. On ne coupe JAMAIS une pièce (les bords suivent les
+    joints) : donc pas de rectangles parfaits à 4 sommets, le signal de bord pour
+    l'appariement GNN survit. **N'altère NI reco-B (⊆ raw) NI le pad+masque** :
+    seule la partition change ; le reste du pipeline est identique à balanced.
+    """
+    nodes = list(piece_graph.nodes)
+    if k >= len(nodes):
+        return {n: i for i, n in enumerate(nodes)}
+
+    # Géométrie par pièce : cellules (set de (i,j)) + périmètre propre (rectangle).
+    pcells = [set(map(tuple, pieces[p]['cells'])) for p in range(len(pieces))]
+    pperim = [2 * (pieces[p]['bbox_grid'][2] + pieces[p]['bbox_grid'][3])
+              for p in range(len(pieces))]
+
+    seeds = select_seeds_farthest(piece_graph, k)
+    assigned = {s: i for i, s in enumerate(seeds)}
+    frag_cells = [set(pcells[s]) for s in seeds]  # cellules par fragment
+    sizes = [1] * k
+    frontier = [set(n for n in piece_graph.neighbors(s) if n not in assigned)
+                for s in seeds]
+
+    heap = [(1, i) for i in range(k)]
+    heapq.heapify(heap)
+    while heap:
+        _, fid = heapq.heappop(heap)
+        cand = [p for p in frontier[fid] if p not in assigned]
+        frontier[fid] = set(cand)
+        if not cand:
+            continue
+        fc = frag_cells[fid]
+
+        def delta_perim(p):
+            # Δpérimètre en ajoutant p = périmètre propre de p − 2×(arêtes partagées
+            # avec le fragment). Remplir une concavité → Δ négatif → bord plus lisse
+            # → moins de coins concaves → reco-B sort moins de sommets.
+            shared = 0
+            for (i, j) in pcells[p]:
+                shared += ((i + 1, j) in fc) + ((i - 1, j) in fc) \
+                        + ((i, j + 1) in fc) + ((i, j - 1) in fc)
+            return (pperim[p] - 2 * shared, -shared, len(pcells[p]))
+
+        best = min(cand, key=delta_perim)         # pièce qui lisse le plus le bord
+        assigned[best] = fid
+        frag_cells[fid] |= pcells[best]
+        sizes[fid] += 1
+        frontier[fid].discard(best)
+        for nb in piece_graph.neighbors(best):
+            if nb not in assigned:
+                frontier[fid].add(nb)
+        heapq.heappush(heap, (sizes[fid], fid))
+
+    # composantes non atteintes (rare : graphe normalement connexe) → rattachées
+    changed = True
+    while changed:
+        changed = False
+        for n in nodes:
+            if n in assigned:
+                continue
+            nbf = [assigned[x] for x in piece_graph.neighbors(n) if x in assigned]
+            if nbf:
+                assigned[n] = nbf[0]
+                changed = True
+    for i, n in enumerate(nodes):                 # tout isolé restant → fragment propre
+        assigned.setdefault(n, k + i)
+    return assigned
+
+
 # ============================================================
 # 5. Fragment polygon and resampling
 # ============================================================
@@ -506,6 +579,46 @@ def _scan_free_position(alpha, occupied, cw, ch, padding, step):
     return None
 
 
+def explode_fragments(fragments_data, target_size, base_factor=1.8, padding=4,
+                      max_factor=4.0, step=0.3):
+    """Placement « vue éclatée » — curriculum L0.
+
+    Chaque fragment GARDE sa position RELATIVE dans la mosaïque, simplement
+    écarté de ses voisins (≈ schéma de montage éclaté). Contrairement au scatter
+    aléatoire (place_fragments), aucun échange de position : un fragment du coin
+    haut-gauche reste en haut-gauche. On dilate les centroïdes-cible par un
+    facteur autour du centre, en l'augmentant jusqu'à supprimer les
+    chevauchements. Renvoie (canvas, placements en ordre d'entrée, taille).
+    """
+    W, H = target_size
+    fac = base_factor
+    while True:
+        cw, ch = int(round(W * fac)), int(round(H * fac))
+        cxt, cyt, cxc, cyc = W / 2.0, H / 2.0, cw / 2.0, ch / 2.0
+        placements, occupied, overlap = [], [], False
+        for f in fragments_data:
+            rgba = f['rgba_rotated']
+            h, w = rgba.shape[:2]
+            alpha = rgba[..., 3] > 0
+            x0, y0, x1, y1 = f['bbox_in_target']
+            x = int(round(cxc + fac * ((x0 + x1) / 2.0 - cxt) - w / 2.0))
+            y = int(round(cyc + fac * ((y0 + y1) / 2.0 - cyt) - h / 2.0))
+            x = max(padding, min(x, cw - w - padding))
+            y = max(padding, min(y, ch - h - padding))
+            if _collides(x, y, alpha, occupied):
+                overlap = True
+            placements.append({'x': x, 'y': y, 'w': w, 'h': h})
+            occupied.append((x, y, alpha))
+        if not overlap or fac >= max_factor:
+            break
+        fac += step
+    canvas = Image.new('RGB', (cw, ch), (255, 255, 255))
+    for f, place in zip(fragments_data, placements):
+        pil = Image.fromarray(f['rgba_rotated'], 'RGBA')
+        canvas.paste(pil, (place['x'], place['y']), pil)
+    return canvas, placements, (cw, ch)
+
+
 def place_fragments(fragments_data, canvas_size, max_tries=200, padding=4):
     """Scatter fragments on a white canvas WITHOUT overlap.
 
@@ -593,7 +706,8 @@ def extract_yolo_polygon(rgba_rotated, place_x, place_y, canvas_size, simplify_e
 # ============================================================
 
 def forge_one(target_path, out_dir, n_sides_range, n_frag_range, canvas_size,
-              stud_size, seed, degrade=None):
+              stud_size, seed, degrade=None, rotate=True, placement='scatter',
+              frag_distribution='balanced', debug=False):
     if seed is not None:
         random.seed(seed)
         np.random.seed(seed)
@@ -605,7 +719,7 @@ def forge_one(target_path, out_dir, n_sides_range, n_frag_range, canvas_size,
 
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / 'fragments').mkdir(exist_ok=True)
+    (out_dir / 'fragments').mkdir(exist_ok=True)       # toujours écrit (entrée du VLM)
 
     pil = Image.open(target_path).convert('RGB')
     img = np.array(pil)
@@ -633,8 +747,13 @@ def forge_one(target_path, out_dir, n_sides_range, n_frag_range, canvas_size,
     piece_graph = build_piece_graph(pieces)
 
     k = random.randint(n_frag_range[0], n_frag_range[1])
-    print(f"[forge] fragmenting into {k} fragments…")
-    piece_to_frag = fragment_pieces(piece_graph, k)
+    print(f"[forge] fragmenting into {k} fragments ({frag_distribution})…")
+    # ultracompact = compact appliqué à des mosaïques 1×1 (mode mono) → la
+    # fragmentation est la MÊME que compact ; "l'ultra" vient de l'input 1×1.
+    if frag_distribution in ('compact', 'ultracompact'):
+        piece_to_frag = fragment_pieces_compact(piece_graph, pieces, k)
+    else:
+        piece_to_frag = fragment_pieces(piece_graph, k)
     frag_pieces = collections.defaultdict(list)
     for pid, fid in piece_to_frag.items():
         frag_pieces[fid].append(pid)
@@ -708,8 +827,10 @@ def forge_one(target_path, out_dir, n_sides_range, n_frag_range, canvas_size,
                           for o in outer_per_side]
 
         rgba, bbox = make_fragment_rgba(all_cells, img, stud_size, mask=mask_in)
-        angle = random.choice([0, 90, 180, 270]) + random.uniform(-5.0, 5.0)
-        rgba_rot = rotate_rgba(rgba, angle)
+        # rotate=False → curriculum L1 : fragments éclatés par TRANSLATION seule
+        # (palier le plus facile : YOLO/pose n'a pas à résoudre l'orientation).
+        angle = (random.choice([0, 90, 180, 270]) + random.uniform(-5.0, 5.0)) if rotate else 0.0
+        rgba_rot = rotate_rgba(rgba, angle) if rotate else rgba
 
         fragment_data.append({
             'node_id': fid_to_idx[fid],
@@ -744,11 +865,16 @@ def forge_one(target_path, out_dir, n_sides_range, n_frag_range, canvas_size,
             print(f"[forge]   {len(missing_ids)} fragment(s) marked missing (input only)")
     present = [f for f in fragment_data if f['node_id'] not in missing_ids]
 
-    print(f"[forge] placing fragments on {canvas_size[0]}x{canvas_size[1]} white canvas…")
-    requested_size = canvas_size
-    canvas, placements, canvas_size = place_fragments(present, canvas_size)
-    if canvas_size != requested_size:
-        print(f"[forge]   canvas grown to {canvas_size[0]}x{canvas_size[1]} to fit all fragments")
+    if placement == 'explode':
+        # L0 : vue éclatée (positions relatives conservées, juste espacées)
+        print("[forge] placing fragments (exploded view, relative layout kept)…")
+        canvas, placements, canvas_size = explode_fragments(present, (W, H))
+    else:
+        print(f"[forge] placing fragments on {canvas_size[0]}x{canvas_size[1]} white canvas…")
+        requested_size = canvas_size
+        canvas, placements, canvas_size = place_fragments(present, canvas_size)
+        if canvas_size != requested_size:
+            print(f"[forge]   canvas grown to {canvas_size[0]}x{canvas_size[1]} to fit all fragments")
     for f, place in zip(present, placements):
         f['placement'] = place
 
@@ -768,17 +894,21 @@ def forge_one(target_path, out_dir, n_sides_range, n_frag_range, canvas_size,
     canvas.save(out_dir / 'source.png')
     (out_dir / 'source_yolo.txt').write_text('\n'.join(yolo_lines) + '\n')
 
+    # Crops par fragment : toujours écrits (entrée du VLM).
     for fdata in present:
         Image.fromarray(fdata['rgba'], 'RGBA').save(
             out_dir / 'fragments' / f"frag_{fdata['node_id']:02d}.png"
         )
-
-    pieces_json = [{
-        'cells': p['cells'],
-        'bbox_grid': p['bbox_grid'],
-        'color': p['color'],
-    } for p in pieces]
-    (out_dir / 'pieces.json').write_text(json.dumps(pieces_json, indent=2))
+    # pieces.json = DEBUG pur (pièces LEGO détectées) : n'entraîne PAS le YOLO (c'est
+    # source_yolo.txt), pas lu par visualize.py, lu NULLE PART → OFF par défaut,
+    # opt-in via --debug (~−0.8 Mo/instance, soit ~20 Go sur 25 000).
+    if debug:
+        pieces_json = [{
+            'cells': p['cells'],
+            'bbox_grid': p['bbox_grid'],
+            'color': p['color'],
+        } for p in pieces]
+        (out_dir / 'pieces.json').write_text(json.dumps(pieces_json, indent=2))
 
     # Build two node representations:
     #   - 'gnn_input': features the GNN may legitimately consume (no target-frame
@@ -957,6 +1087,19 @@ def parse_args():
     p.add_argument('--canvas-h', type=int, default=3500)
     p.add_argument('--stud-size', type=int, default=None,
                    help='Pixels per stud (auto-detected from image size if omitted)')
+    p.add_argument('--no-rotation', action='store_true',
+                   help='Curriculum L1 : fragments éclatés SANS rotation (translation seule)')
+    p.add_argument('--placement', choices=['scatter', 'explode'], default='scatter',
+                   help="explode = curriculum L0 : vue éclatée (positions relatives "
+                        "gardées, juste espacées) ; scatter = placement aléatoire (défaut)")
+    p.add_argument('--frag-distribution', choices=['balanced', 'compact', 'ultracompact'],
+                   default='balanced',
+                   help="motif de découpe : balanced (BFS, défaut), compact (~rectangulaire), "
+                        "ou ultracompact (= compact, à utiliser sur des mosaïques 1×1 `--mode mono`). "
+                        "voronoi/clusters = à venir")
+    p.add_argument('--debug', action='store_true',
+                   help="écrit aussi pieces.json (debug du détecteur de pièces, lu nulle "
+                        "part) ; OFF par défaut")
     # --- degradation knobs (curriculum) ; all default OFF → clean reco-B ---
     p.add_argument('--erode-px-min', type=int, default=0,
                    help='Min boundary-erosion radius in px (DAFNE E)')
@@ -992,6 +1135,10 @@ def main():
         stud_size=args.stud_size,
         seed=args.seed,
         degrade=degrade_from_args(args),
+        rotate=not args.no_rotation,
+        placement=args.placement,
+        frag_distribution=args.frag_distribution,
+        debug=args.debug,
     )
 
 

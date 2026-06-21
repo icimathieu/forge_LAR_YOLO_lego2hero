@@ -24,11 +24,14 @@ def parse_args():
     p.add_argument("--grid", type=int, default=96, help="studs par côté")
     p.add_argument("--stud-size", type=int, default=40, help="px par stud (≥40)")
     p.add_argument("--joint-px", type=int, default=None, help="largeur du joint (défaut ~3)")
-    p.add_argument("--mode", choices=["tile", "plate", "brick"], default="tile",
+    p.add_argument("--mode", choices=["tile", "plate", "brick", "mono"], default="tile",
                    help="jeu de pièces LEGO (tile par défaut, max 2×6 ; plate = jusqu'à 4×4/4×10)")
     p.add_argument("--big-plates", action="store_true",
                    help="réactive 4×8/4×10 (décochées par défaut sur le site)")
     p.add_argument("--start-index", type=int, default=0, help="indice de départ du nom")
+    p.add_argument("--max-dominant-frac", type=float, default=None,
+                   help="garde-fou : rejeter une image si une couleur LEGO couvre > cette "
+                        "fraction des cellules (aplats monochromes). None = désactivé")
     return p.parse_args()
 
 
@@ -41,15 +44,23 @@ def main():
     out = Path(a.out_dir)
     out.mkdir(parents=True, exist_ok=True)
     print(f"{len(imgs)} image(s) -> {out}/")
+    made = rejected = 0
     for k, src in enumerate(imgs, start=a.start_index):
         png = out / f"canvas_mosaic_{k:03d}.png"
         js = out / f"piece_grid_{k:03d}.json"
         g = forge_to_files(str(src), str(png), str(js),
                            grid_w=a.grid, grid_h=a.grid,
                            stud_size=a.stud_size, joint_px=a.joint_px,
-                           mode=a.mode, big_plates=a.big_plates)
+                           mode=a.mode, big_plates=a.big_plates,
+                           max_dominant_frac=a.max_dominant_frac)
+        if g.get("rejected"):                     # garde-fou : aplat monochrome
+            rejected += 1
+            print(f"  [{k:03d}] {src.name:30s} -> REJETÉ (couleur dominante {g['dominant_frac']:.0%})")
+            continue
+        made += 1
         print(f"  [{k:03d}] {src.name:30s} -> {png.name}  ({g['n_pieces']} pièces)")
-    print(f"Fait. Ensuite : python3 mosaic2fragments/batch.py --inputs {out}/canvas_mosaic_*.png --out dataset")
+    print(f"Fait : {made} mosaïques (rejetées par garde-fou : {rejected}).")
+    print(f"Ensuite : python3 scripts/mosaic2fragments/batch.py --inputs {out}/canvas_mosaic_*.png --out dataset")
 
 
 if __name__ == "__main__":

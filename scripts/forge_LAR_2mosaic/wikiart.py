@@ -28,8 +28,13 @@ def parse_args():
     p.add_argument("--grid", type=int, default=96, help="studs par côté")
     p.add_argument("--stud-size", type=int, default=40, help="px par stud (≥40)")
     p.add_argument("--joint-px", type=int, default=None, help="largeur du joint (défaut ~3)")
-    p.add_argument("--mode", choices=["tile", "plate", "brick"], default="tile")
+    p.add_argument("--mode", choices=["tile", "plate", "brick", "mono"], default="tile",
+                   help="mono = tuiles 1×1 seules (pour le curriculum ultracompact)")
     p.add_argument("--big-plates", action="store_true", help="réactive 4×8/4×10")
+    p.add_argument("--max-dominant-frac", type=float, default=0.55,
+                   help="garde-fou : rejeter une image si une seule couleur LEGO couvre "
+                        "> cette fraction des cellules (impressionnistes → aplats monochromes). "
+                        "1.0 ou plus = désactivé")
     p.add_argument("--dataset", default="huggan/wikiart",
                    help="dataset HF en streaming (image attendue dans ex['image'])")
     return p.parse_args()
@@ -45,6 +50,7 @@ def main():
     ds = load_dataset(a.dataset, split="train", streaming=True)
 
     made = 0
+    rejected = 0                                   # garde-fou couleur dominante
     for ex in islice(ds, a.skip, None):
         if made >= a.n:
             break
@@ -60,17 +66,20 @@ def main():
             mos, grid = forge_mosaic(
                 img, grid_w=a.grid, grid_h=a.grid, stud_size=a.stud_size,
                 joint_px=a.joint_px, mode=a.mode, big_plates=a.big_plates,
-                source_name=uid)
+                source_name=uid, max_dominant_frac=a.max_dominant_frac)
         except Exception as e:                   # forge échoue → on saute l'image
             print(f"  skip (forge: {e})")
+            continue
+        if mos is None:                          # garde-fou : aplat monochrome → rejeté
+            rejected += 1
             continue
         mos.save(out / f"canvas_mosaic_{uid}.png")
         (out / f"piece_grid_{uid}.json").write_text(json.dumps(grid))
         made += 1
         if made % 20 == 0:
-            print(f"  {made}/{a.n}…")
-    print(f"Fait : {made} mosaïques dans {out}/")
-    print(f"Ensuite : python3 mosaic2fragments/batch.py "
+            print(f"  {made}/{a.n}… (rejetées par garde-fou : {rejected})")
+    print(f"Fait : {made} mosaïques dans {out}/  (rejetées par garde-fou couleur : {rejected})")
+    print(f"Ensuite : python3 scripts/mosaic2fragments/batch.py "
           f"--inputs {out}/canvas_mosaic_*.png --out dataset_wikiart")
 
 

@@ -61,23 +61,20 @@ def write_dataset_readme(dataset_dir, n_max, n_graphs):
     name = os.path.basename(os.path.normpath(dataset_dir))
     txt = f"""# `{name}/` — mosaïques LEGO fragmentées
 
-{n_graphs} mosaïques. Chaque `mosaic_<id>/` est une instance — l'**entrée** des
-étapes aval (YOLO / GNN / VLM).
-
 ## Fichiers par mosaïque (`mosaic_<id>/`)
 | Fichier | Rôle |
 |---|---|
-| `target.png` | la mosaïque **complète** (objet reconstitué) |
-| `source.png` | les fragments **éclatés** sur fond blanc (≈ photo d'entrée) |
-| `source_yolo.txt` | labels **YOLO-Seg** (`classe x1 y1 … xn yn`, normalisés [0,1]) |
-| `source_yolo_viz.png` | overlay debug des labels (non utilisé par le GNN) |
-| `pieces.json` | debug : pièces LEGO détectées |
+| `target.png` | mosaïque **complète** = cible de reconstruction / contexte VLM |
+| `source.png` | fragments **éclatés** sur fond blanc = **entrée YOLO** (et entrée VLM) |
+| `source_yolo.txt` | **vérité terrain YOLO-Seg** : 1 polygone/fragment, normalisé `[0,1]` (entraîne YOLO avec `source.png`) |
+| `source_yolo_viz.png` | overlay debug des labels (inspection humaine) — *absent par défaut* (opt-in `--debug`) |
+| `pieces.json` | debug pur (pièces LEGO détectées) ; **n'entraîne PAS le YOLO** (c'est `source_yolo.txt`), lu nulle part — *absent par défaut* (opt-in `--debug`) |
 | `graph_fragments.json` | **ENTRÉE GNN** : nœuds (features/fragment), zéro arête, sans `target_info` |
 | `graph_complete.json` | **CIBLE GNN** : mêmes nœuds + `target_info` (leak) + arêtes (mating graph) |
-| `gt_layout.json` | GT de reconstruction (polygones parfait/dégradé + pose) |
+| `gt_layout.json` | **GT de RECONSTRUCTION** (réponse finale) : footprint exact + pose `(x,y,rot)` de chaque fragment dans `target.png`. Sert à **scorer l'assemblage** (IoU/Q_pos) APRÈS la tête de pose du GNN / le VLM qui place les fragments |
 | `gnn_ready.npz` | entrée GNN à **dimension fixe** (pad `n_max={n_max}` + masque) |
 | `degradation.md` | rapport de dégradation (0 si clean) |
-| `fragments/frag_XX.png` | crop alpha par fragment |
+| `fragments/frag_XX.png` | crop alpha par fragment = **entrée VLM** |
 
 Au niveau dataset : **`gnn_meta.json`** (`n_max={n_max}`, noms de features).
 
@@ -92,7 +89,7 @@ Au niveau dataset : **`gnn_meta.json`** (`n_max={n_max}`, noms de features).
 `n_sides` **variable** par nœud → paddé à `n_max={n_max}` + masque dans `gnn_ready.npz`.
 ⚠️ **`target_info`** (dans `graph_complete`) = vérité terrain → ne **jamais** donner en entrée.
 
-_Régénéré par `mosaic2fragments/batch.py` + `features/collate.py`._
+_Régénéré par `scripts/mosaic2fragments/{{batch,curriculum}}.py` + `scripts/features/collate.py`._
 """
     open(os.path.join(dataset_dir, "README.md"), "w", encoding="utf-8").write(txt)
 

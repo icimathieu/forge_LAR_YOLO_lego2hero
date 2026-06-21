@@ -49,7 +49,8 @@ BRICK_DIMS = {                                      # "Variable Brick"
     (1, 6): "3009", (1, 8): "3008", (2, 2): "3003", (2, 3): "3002",
     (2, 4): "3001", (2, 6): "2456", (2, 8): "3007",
 }
-MODE_DIMS = {"tile": TILE_DIMS, "plate": PLATE_DIMS, "brick": BRICK_DIMS}
+MONO_DIMS = {(1, 1): "3070b"}                       # 1×1 SEUL (mode ultracompact)
+MODE_DIMS = {"tile": TILE_DIMS, "plate": PLATE_DIMS, "brick": BRICK_DIMS, "mono": MONO_DIMS}
 # Le site DÉCOCHE par défaut les plus grosses plates (UI : DEFAULT_DISABLED_DEPTH_PLATES).
 DEFAULT_DISABLED = {(4, 8), (4, 10)}
 
@@ -174,13 +175,28 @@ def render_mosaic(pieces, grid_w, grid_h, stud_size, joint_px, palette=LEGO_PALE
 # ============================================================
 
 def forge_mosaic(image, grid_w=96, grid_h=96, stud_size=40, joint_px=None,
-                 mode="tile", big_plates=False, palette=LEGO_PALETTE, source_name=None):
-    """image (chemin ou PIL.Image) -> (PIL.Image mosaïque, dict piece_grid). mode: tile|plate|brick."""
+                 mode="tile", big_plates=False, palette=LEGO_PALETTE, source_name=None,
+                 max_dominant_frac=None):
+    """image (chemin ou PIL.Image) -> (PIL.Image mosaïque, dict piece_grid). mode: tile|plate|brick.
+
+    Garde-fou `max_dominant_frac` (∈ ]0,1]) : si une seule couleur de palette couvre
+    > cette fraction des cellules, l'image est REJETÉE → renvoie `(None, stats)`.
+    Cible : les peintures (souvent impressionnistes) à variations infimes d'une même
+    couleur, qui s'effondrent en un gros aplat monochrome une fois quantifiées (peu de
+    pièces, détection de joints faussée). None par défaut = garde-fou désactivé.
+    """
     if joint_px is None:
         joint_px = max(2, round(stud_size * 0.075))    # ~3 px à 40 px/stud
     allowed = build_allowed_parts(mode, big_plates)
     color_grid = image_to_color_grid(image, grid_w, grid_h)
     idx_grid = quantize_to_palette(color_grid, palette)
+    counts = np.bincount(idx_grid.ravel(), minlength=len(palette))
+    dominant_frac = float(counts.max() / idx_grid.size)
+    n_colors = int((counts > 0).sum())
+    if max_dominant_frac is not None and dominant_frac > max_dominant_frac:
+        return None, {"rejected": True, "reason": "dominant_color",
+                      "dominant_frac": dominant_frac, "n_colors": n_colors,
+                      "max_dominant_frac": max_dominant_frac}
     pieces = pack_variable_tiles(idx_grid, allowed)
     img = render_mosaic(pieces, grid_w, grid_h, stud_size, joint_px, palette)
     piece_grid = {
@@ -192,6 +208,8 @@ def forge_mosaic(image, grid_w=96, grid_h=96, stud_size=40, joint_px=None,
         "mode": mode,
         "max_piece": list(max((p[:2] for p in allowed), key=lambda d: d[0] * d[1])),
         "source_image": source_name or (Path(image).name if isinstance(image, (str, Path)) else "image"),
+        "dominant_frac": dominant_frac,
+        "n_colors": n_colors,
         "n_pieces": len(pieces),
         "n_cells": grid_w * grid_h,
         "pieces": [
@@ -206,6 +224,8 @@ def forge_mosaic(image, grid_w=96, grid_h=96, stud_size=40, joint_px=None,
 
 def forge_to_files(image_path, out_png, out_json, **kw):
     img, grid = forge_mosaic(image_path, **kw)
+    if img is None:                                   # rejeté par le garde-fou
+        return grid                                   # stats, rien écrit
     Path(out_png).parent.mkdir(parents=True, exist_ok=True)
     img.save(out_png)
     Path(out_json).write_text(json.dumps(grid, indent=2))
