@@ -70,38 +70,98 @@ def _clip_to_polygon(poly_enc, poly_raw):
     return np.array(best.exterior.coords[:-1], dtype=np.float32)
 
 
-def resample_reflex_aware(polygon_raw, n_target, clip=True):
-    """Reco B — simplify the contour to ~n_target vertices while KEEPING every
-    concave (reflex) vertex and only cutting convex ones (inscribed chord).
+MAX_AREA_LOSS_DEFAULT = 0.01      # ε : perte d'aire tolérée pour polygon_n (1 %)
 
-    Guarantees polygon_n ⊆ polygon_raw: area is never *gained*, only lost ("as if
-    the corners were chipped"), so reassembled fragments never overlap — they
-    leave gaps (the physically realisable, eroded-gaps regime). n_target is a
-    TARGET, not a hard cap: the hard floor is #reflex (dropping a reflex vertex
-    would bridge a concavity and re-gain area), so the effective vertex count is
-    max(#reflex, …) ≤ #real-corners. Returns a VARIABLE-length polygon.
+
+def resample_reflex_aware(polygon_raw, n_min=0, clip=True,
+                          max_area_loss=MAX_AREA_LOSS_DEFAULT):
+    """Reco B — simplifie le contour en **budgétant la PERTE D'AIRE**, `n` en sortie.
+
+    Garantit `polygon_n ⊆ polygon_raw` : on ne *gagne* jamais d'aire, on en perd
+    (« comme si les coins étaient ébréchés ») → les fragments réassemblés ne se
+    chevauchent jamais, ils laissent des jours (régime physiquement réalisable).
+    Renvoie un polygone de longueur VARIABLE.
+
+    Algorithme = **Visvalingam-Whyatt** (1993) *restreint aux sommets convexes* :
+    on retire itérativement le sommet dont le triangle (préc., lui, suiv.) a la
+    plus petite aire, tant que la perte CUMULÉE reste ≤ `max_area_loss` (fraction
+    de l'aire du polygone). Deux invariants :
+      - **seuls les convexes sont retirables** — retirer un sommet reflex
+        pontifierait une concavité et **re-gagnerait** de l'aire (viole ⊆ raw) ;
+      - les sommets ~colinéaires ont un triangle d'aire nulle → retirés en
+        premier, **gratuitement** (c'est le gros du bruit de contour LEGO).
+
+    ⚠️ **Corrigé le 23/07/2026.** L'implémentation précédente budgétait le NOMBRE
+    de sommets (`n_target` ∈ [16,24]) en amorçant `keep` avec tous les reflex :
+    comme `#reflex` (médiane **58** sur LEGO) ≥ `n_target` dans **100 %** des
+    fragments, la boucle sortait immédiatement et **aucun convexe n'était jamais
+    gardé**. Résultat : perte d'aire médiane **21,4 %** (p95 85,8 %, un quart des
+    fragments perdant >50 % de leur aire) sur la config k=10-15 du dataset 25k,
+    et jusqu'à 99 % à k=2. L'invariant ⊆ raw tenait (pas d'aire fantôme) mais
+    l'AMPLEUR de la perte n'était ni bornée ni mesurée. On budgète désormais la
+    grandeur qui compte (la fidélité), et `n` en découle.
+
+    `n_min` : plancher optionnel sur le nombre de sommets (0 = pas de plancher).
+    Le plancher réel reste **#reflex**, atteint automatiquement.
     """
+    import heapq
+
     P = np.asarray(polygon_raw, dtype=np.float32)
-    if len(P) < 4:
-        return P.copy()
-    kind = _classify_vertices(P)
     M = len(P)
-    corners = [i for i in range(M) if kind[i] != 0]
-    keep = set(i for i in corners if kind[i] < 0)        # reflex: mandatory
+    if M < 4:
+        return P.copy()
 
-    def significance(i):                                  # most shape-bearing convex
-        a, b, c = P[i - 1], P[i], P[(i + 1) % M]
-        return float(np.linalg.norm(b - a) + np.linalg.norm(c - b))
+    total_area = abs(_polygon_signed_area(P))
+    if total_area <= 0:
+        return P.copy()
+    budget = max_area_loss * total_area
 
-    convex = sorted((i for i in corners if i not in keep),
-                    key=significance, reverse=True)
-    for i in convex:
-        if len(keep) >= n_target:
+    orient = np.sign(_polygon_signed_area(P)) or 1.0
+    prev = [(i - 1) % M for i in range(M)]
+    nxt = [(i + 1) % M for i in range(M)]
+    alive = [True] * M
+    n_alive = M
+
+    def tri(i):
+        """(aire du triangle retiré, convexe ?) pour le sommet i dans l'état courant."""
+        a, b, c = P[prev[i]], P[i], P[nxt[i]]
+        cross = (b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0])
+        return abs(cross) / 2.0, (cross * orient) >= 0      # ≥ 0 : convexe ou colinéaire
+
+    heap = []
+    for i in range(M):
+        a, cvx = tri(i)
+        if cvx:
+            heapq.heappush(heap, (a, i))
+
+    lost = 0.0
+    while heap and n_alive > 3:
+        a, i = heapq.heappop(heap)
+        if not alive[i]:
+            continue
+        a_now, cvx_now = tri(i)                             # ré-évaluation paresseuse
+        if not cvx_now:                                     # devenu reflex → intouchable
+            continue
+        if a_now > a + 1e-9:                                # coût périmé → re-pousser
+            heapq.heappush(heap, (a_now, i))
+            continue
+        if lost + a_now > budget:                           # budget épuisé
             break
-        keep.add(i)
-    poly = P[sorted(keep)] if keep else P
+        if n_min and n_alive <= n_min:
+            break
+        alive[i] = False
+        n_alive -= 1
+        lost += a_now
+        p, n = prev[i], nxt[i]
+        nxt[p], prev[n] = n, p
+        for j in (p, n):                                    # coûts des voisins modifiés
+            aj, cj = tri(j)
+            if cj and alive[j]:
+                heapq.heappush(heap, (aj, j))
+
+    poly = P[[i for i in range(M) if alive[i]]]
     if clip:
-        poly = _clip_to_polygon(poly, P)
+        poly = _clip_to_polygon(poly, P)                    # filet de sécurité ⊆ raw
     return np.asarray(poly, dtype=np.float32)
 
 

@@ -54,11 +54,73 @@ def visualize(dataset_dir):
           f"mean={np.mean(sizes):.1f}")
 
 
+def visualize_recob(dataset_dir):
+    """Viz des DEUX pertes d'aire, en repère target (depuis `gt_layout.json`).
+
+    Par fragment, trois couches :
+      couleur pâle  = `polygon_raw` (empreinte PARFAITE)
+      hachures GRISES fines       = perte de DÉGRADATION (raw − raw_degraded :
+                                    érosion, trous — voulue, c'est l'input L3/L4)
+      hachures COULEUR marquées   = perte d'ENCODAGE reco-B (raw_degraded −
+                                    polygon_n : budget --max-area-loss, ~ε)
+      trait noir    = `polygon_n` (ce que voit le GNN)
+    NB : `source.png` n'est PAS affecté par la perte d'encodage (vrais pixels
+    découpés par le masque dégradé) — elle n'existe que dans polygon_n.
+    """
+    import cv2
+
+    d = Path(dataset_dir)
+    gl = json.loads((d / 'gt_layout.json').read_text())
+    W, H = gl['target_size']
+    img = np.full((H, W, 3), 255, dtype=np.uint8)
+
+    hatch = np.zeros((H, W), dtype=np.uint8)          # trame diagonale //
+    for c in range(-H, W, 14):
+        cv2.line(hatch, (c, 0), (c + H, H), 1, 2)
+    hatch2 = np.zeros((H, W), dtype=np.uint8)         # trame croisée \\ serrée
+    for c in range(-H, W, 8):
+        cv2.line(hatch2, (c + H, 0), (c, H), 1, 1)
+
+    deg_total = enc_total = raw_total = 0.0
+    for idx, f in enumerate(gl['fragments']):
+        raw = np.array(f['polygon_raw'], dtype=np.int32)
+        deg = np.array(f['polygon_raw_degraded'], dtype=np.int32)
+        enc = np.array(f['polygon_n'], dtype=np.int32)
+        color = COLORS[idx % len(COLORS)]
+        pale = tuple(int(v + (255 - v) * 0.72) for v in color)
+        m = {}
+        for k, poly in (('raw', raw), ('deg', deg), ('enc', enc)):
+            m[k] = np.zeros((H, W), dtype=np.uint8)
+            if len(poly) >= 3:
+                cv2.fillPoly(m[k], [poly], 1)
+        lost_deg = (m['raw'] > 0) & (m['deg'] == 0)   # dégradation (voulue)
+        lost_enc = (m['deg'] > 0) & (m['enc'] == 0)   # encodage reco-B (ε)
+        img[m['raw'] > 0] = pale
+        img[lost_deg & (hatch2 > 0)] = (150, 150, 150)
+        img[lost_enc & (hatch > 0)] = color
+        if len(enc) >= 3:
+            cv2.polylines(img, [enc], True, (0, 0, 0), 2)
+        deg_total += float(lost_deg.sum())
+        enc_total += float(lost_enc.sum())
+        raw_total += float((m['raw'] > 0).sum())
+
+    out_path = d / 'recob_viz.png'
+    Image.fromarray(img).save(out_path)
+    print(f"Wrote {out_path}  (perte dégradation [hachures grises] : "
+          f"{100 * deg_total / max(raw_total, 1):.2f} % ; perte encodage reco-B "
+          f"[hachures couleur] : {100 * enc_total / max(raw_total, 1):.2f} %)")
+
+
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument('--dir', default='dataset/mosaic_001')
+    p.add_argument('--recob', action='store_true',
+                   help="écrit aussi recob_viz.png (perte d'encodage reco-B hachurée)")
     return p.parse_args()
 
 
 if __name__ == '__main__':
-    visualize(parse_args().dir)
+    a = parse_args()
+    visualize(a.dir)
+    if a.recob:
+        visualize_recob(a.dir)

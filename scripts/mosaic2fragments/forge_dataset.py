@@ -42,7 +42,7 @@ from PIL import Image
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from features.fragment_features import (  # noqa: E402
     _polygon_signed_area, extract_polygon, resample_reflex_aware,
-    pca_canonical_rotation, compute_fragment_features,
+    pca_canonical_rotation, compute_fragment_features, MAX_AREA_LOSS_DEFAULT,
 )
 
 
@@ -707,7 +707,8 @@ def extract_yolo_polygon(rgba_rotated, place_x, place_y, canvas_size, simplify_e
 
 def forge_one(target_path, out_dir, n_sides_range, n_frag_range, canvas_size,
               stud_size, seed, degrade=None, rotate=True, placement='scatter',
-              frag_distribution='balanced', debug=False):
+              frag_distribution='balanced', debug=False,
+              max_area_loss=MAX_AREA_LOSS_DEFAULT):
     if seed is not None:
         random.seed(seed)
         np.random.seed(seed)
@@ -807,8 +808,11 @@ def forge_one(target_path, out_dir, n_sides_range, n_frag_range, canvas_size,
             if len(polygon_raw_deg) >= 3 else 0.0
         lost_frac = float(1.0 - deg_area / perf_area) if perf_area > 0 else 0.0
 
-        n_target = random.randint(n_sides_range[0], n_sides_range[1])
-        polygon_n = resample_reflex_aware(polygon_raw_deg, n_target)  # INPUT, ⊆ perfect
+        # reco B : budget sur la PERTE D'AIRE (ε), n en sortie. `n_sides_range`
+        # est CONSERVÉ comme plancher optionnel mais n'est plus le budget — cf.
+        # resample_reflex_aware (correctif 23/07/2026).
+        polygon_n = resample_reflex_aware(polygon_raw_deg, n_min=0,
+                                          max_area_loss=max_area_loss)  # INPUT, ⊆ perfect
         centroid = polygon_n.mean(axis=0)
         # rotation-invariance : repère canonique PCA (sur le masque observé)
         R = pca_canonical_rotation(mask_in)
@@ -964,7 +968,8 @@ def forge_one(target_path, out_dir, n_sides_range, n_frag_range, canvas_size,
         })
 
     common_meta = {
-        'n_sides_range': list(n_sides_range),
+        'max_area_loss': max_area_loss,          # ε — LE budget de reco B (fidélité)
+        'n_sides_range': list(n_sides_range),    # OBSOLÈTE depuis le 23/07/2026 (info seule)
         'n_sides_note': ("polygon_n_canonical / side_features ont une longueur "
                          "VARIABLE par nœud (cf. champ 'n_sides' de chaque nœud). "
                          "Reco B reflex-aware : polygon_n ⊆ polygon_raw (l'aire "
@@ -1046,7 +1051,8 @@ def forge_one(target_path, out_dir, n_sides_range, n_frag_range, canvas_size,
         f"- Érosion morpho : `{list(erode_rng)}` px",
         f"- Trous internes : `{list(holes_rng)}` (aire totale plafonnée à 10 % du fragment)",
         f"- Fragments manquants : `{list(missing_rng)}` → **{len(missing_ids)}** tiré(s)",
-        f"- Sommets (reco B) : `{list(n_sides_range)}` (plancher dur = #reflex)", "",
+        f"- Reco B — perte d'aire tolérée : `{max_area_loss:.1%}` (ε ; n en sortie, "
+        f"plancher dur = #reflex)", "",
         "## Par fragment",
         "| node_id | manquant | érosion px | trous | n sommets | aire perdue % |",
         "|---:|:---:|---:|---:|---:|---:|",
@@ -1081,6 +1087,10 @@ def parse_args():
                    help='Min target vertex count per fragment (reco B, variable n)')
     p.add_argument('--n-sides-max', type=int, default=24,
                    help='Max target vertex count per fragment (floor = #reflex)')
+    p.add_argument('--max-area-loss', type=float, default=MAX_AREA_LOSS_DEFAULT,
+                   help="reco B — fraction d'aire que polygon_n a le droit de PERDRE "
+                        "vs polygon_raw (défaut 0.01 = 1%%). C'est LE budget ; le nombre "
+                        "de sommets en découle. Remplace --n-sides-min/max (23/07/2026)")
     p.add_argument('--n-frag-min', type=int, default=10)
     p.add_argument('--n-frag-max', type=int, default=15)
     p.add_argument('--canvas-w', type=int, default=3500)
@@ -1130,6 +1140,7 @@ def main():
         target_path=args.input,
         out_dir=args.out,
         n_sides_range=(args.n_sides_min, args.n_sides_max),
+        max_area_loss=args.max_area_loss,
         n_frag_range=(args.n_frag_min, args.n_frag_max),
         canvas_size=(args.canvas_w, args.canvas_h),
         stud_size=args.stud_size,

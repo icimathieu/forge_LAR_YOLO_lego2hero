@@ -24,6 +24,9 @@ def main():
     p.add_argument('--seed-start', type=int, default=0)
     p.add_argument('--n-sides-min', type=int, default=16)
     p.add_argument('--n-sides-max', type=int, default=24)
+    p.add_argument('--max-area-loss', type=float, default=0.01,
+                   help="reco B — perte d'aire tolérée pour polygon_n (défaut 1%%) ; "
+                        "c'est LE budget, n en découle")
     p.add_argument('--n-frag-min', type=int, default=10)
     p.add_argument('--n-frag-max', type=int, default=15)
     p.add_argument('--canvas-w', type=int, default=3500)
@@ -68,6 +71,7 @@ def main():
             target_path=inp,
             out_dir=sample_dir,
             n_sides_range=(args.n_sides_min, args.n_sides_max),
+            max_area_loss=args.max_area_loss,
             n_frag_range=(args.n_frag_min, args.n_frag_max),
             canvas_size=(args.canvas_w, args.canvas_h),
             stud_size=None,

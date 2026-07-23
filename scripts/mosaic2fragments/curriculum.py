@@ -83,6 +83,17 @@ def parse_args():
     p.add_argument("--n-sides-max", type=int, default=24)
     p.add_argument("--n-frag-min", type=int, default=10)
     p.add_argument("--n-frag-max", type=int, default=15)
+    p.add_argument("--max-area-loss", type=float, default=0.01,
+                   help="reco B — fraction d'aire que polygon_n a le droit de PERDRE "
+                        "vs polygon_raw (défaut 0.01 = 1 %%). C'est LE budget ; le "
+                        "nombre de sommets en découle (correctif 23/07/2026).")
+    p.add_argument("--missing-max", type=int, default=None,
+                   help="plafond du nb de fragments MANQUANTS (DAFNE C) des paliers. "
+                        "DAFNE C est un POURCENTAGE, notre `missing` un COMPTE ABSOLU → "
+                        "défaut = round(0.15·n_frag_max) (~15 %% de k, quel que soit k). "
+                        "À k=10-15 ça donne 2 = le réglage historique exact (run 25k "
+                        "reproductible) ; à k=2/3 → 0 ; k=5 → 1. Passer une valeur pour "
+                        "outrepasser.")
     p.add_argument("--canvas-w", type=int, default=4096)
     p.add_argument("--canvas-h", type=int, default=4096)
     p.add_argument("--levels", nargs="+", default=list(LEVELS),
@@ -113,7 +124,7 @@ def _run_task(t):
             n_sides_range=t["n_sides"], n_frag_range=t["n_frag"], canvas_size=t["canvas"],
             stud_size=None, seed=t["seed"], degrade=t["degrade"],
             rotate=t["rotate"], placement=t["placement"], frag_distribution=t["frag_distribution"],
-            debug=t["debug"],
+            debug=t["debug"], max_area_loss=t["max_area_loss"],
         )
         if t["viz"]:
             visualize(t["dir"])
@@ -140,14 +151,20 @@ def main():
             suffix = f"_s{seed}" if a.n_per_input > 1 else ""
             for level in a.levels:
                 cfg = LEVELS[level]
+                # DAFNE C est un %, `missing` un compte absolu → plafond ~15 % de k.
+                # round(0.15·15)=2 ⟹ identique au réglage historique à k=10-15.
+                cap = a.missing_max if a.missing_max is not None \
+                    else round(0.15 * a.n_frag_max)
+                miss = (min(cfg["missing"][0], cap), min(cfg["missing"][1], cap))
                 tasks.append(dict(
                     inp=inp, dir=str(out_root / level / f"mosaic_{uid}{suffix}"),
                     n_sides=(a.n_sides_min, a.n_sides_max),
                     n_frag=(a.n_frag_min, a.n_frag_max),
                     canvas=(a.canvas_w, a.canvas_h), seed=seed,
-                    degrade={"erode_px": cfg["erode"], "holes": cfg["holes"], "missing": cfg["missing"]},
+                    degrade={"erode_px": cfg["erode"], "holes": cfg["holes"], "missing": miss},
                     rotate=cfg["rotate"], placement=cfg["placement"],
                     frag_distribution=a.frag_distribution, viz=a.debug, debug=a.debug,
+                    max_area_loss=a.max_area_loss,
                     label=f"{level} mosaic_{uid}{suffix}"))
     total = len(tasks)
     print(f"curriculum [{a.frag_distribution}] : {total} instances → {out_root}/ (jobs={a.jobs})")
