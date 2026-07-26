@@ -47,7 +47,7 @@
 
   `compact` seul : −20 %% de médiane mais **queue inchangée** (n_max 183≈184). Le levier = la **combinaison**. Ultracompact OK à k≥10 seulement (k≤5 → rectangles purs)
 - ✅ **`--missing-max` pérennisé** : défaut = `round(0.15·n_frag_max)` (≡ réglage historique 0-2 à k=10-15, le 25k reste reproductible) ; flag = override
-- ✅ `collate.py --n-max N` : **n_max JOINT imposé** cross-paliers/datasets/réel (erreur si < max observé ; `gnn_meta.json` garde `n_max_observed`). Repère : 304 couvre LEGO + RePAIR réel
+- ✅ `collate.py --n-max N` : **n_max JOINT imposé** cross-paliers/datasets/réel (erreur si < max observé ; `gnn_meta.json` garde `n_max_observed`). Repère **re-mesuré sur les 8 datasets ×5000** : max observé = **344** (`poly_balanced/k03`, L0-L2) ; RePAIR réel plafonne à 291 ⇒ **`--n-max 344`** couvre LEGO + réel. ⚠️ l'ancien repère 304 (pilote 100 mosaïques) est **trop bas** à l'échelle 5000
 - ✅ `visualize.py --recob` : **viz des 2 pertes d'aire** (`recob_viz.png`) — hachures grises = dégradation (érosion/trous, voulue), hachures couleur = encodage reco-B (ε), trait noir = `polygon_n`. `source.png` n'est PAS affecté par la perte d'encodage (vrais pixels découpés par le masque dégradé)
 
 ## À faire

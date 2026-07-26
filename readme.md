@@ -13,7 +13,7 @@ par une **matrice complète de 8 datasets appariés** (200 000 instances).
 | 2 | **Nombre de fragments** (DAFNE A) | k = 10-15 uniquement | axe ouvert : **k = 2 · 3 · 5 · 10-15** (`--n-frag-min/max`) — la difficulté est dans les **arêtes** (1,0 → 27,1 par mosaïque) |
 | 3 | **Motif de découpe** | `balanced` seul | `balanced` · `compact` · **`ultracompact`** (mosaïque forgée en tuiles 1×1 via `remono.py` + croissance compacte) |
 | 4 | **Contrat de données GNN** | dense seul (pad `n_max` + masque) | **2 contrats dans le même `.npz`** : dense **et** ragged (`verts_flat` + `node_offsets`, sans `n_max`) → encodeur agnostique à la longueur possible (PointNet / Deep Sets) |
-| 5 | **`n_max` cross-datasets** | par palier, non comparable | `collate.py --n-max` (n_max **joint**) ; **304** couvre LEGO **et** RePAIR réel |
+| 5 | **`n_max` cross-datasets** | par palier, non comparable | `collate.py --n-max` (n_max **joint**) ; **≥ 344** couvre les 8 datasets **et** RePAIR réel (cf. tableau mesuré) |
 | 6 | **Fragments manquants** (DAFNE C) | compte absolu 0-2 (à k=2, L4 ne laissait qu'**un** fragment) | plafond **relatif** automatique `round(0.15·k)`, surchargeable par `--missing-max` |
 | 7 | **Dataset publié** | `balanced/` | hiérarchie `<grille_croissance>/<k>/<palier>` — cf. section suivante ; l'ancien devient **`LEGACY_DO_NOT_USE/`** |
 
@@ -46,6 +46,39 @@ LEGACY_DO_NOT_USE/   ancien `balanced/` (v1) — ⛔ NE PAS ENTRAÎNER DESSUS
 - À **k=2** la prédiction de lien est dégénérée par construction (1 seule arête
   possible, toujours présente ⇒ F1 = 1,0 pour n'importe quel modèle) : seule la
   **pose** (Q_pos) y est mesurable.
+
+### `n_max` re-mesurés (v2, 5 000 mosaïques par case)
+
+Nombre de sommets du plus gros fragment du dataset (`n_max_observed` dans chaque
+`gnn_meta.json`). **Ce sont les valeurs de référence** — celles publiées avant le
+23/07/2026 sont caduques.
+
+| dataset | L0 | L1 | L2 | L3 | L4 |
+|---|---:|---:|---:|---:|---:|
+| `poly_balanced/k10-15` | 224 | 224 | 224 | 169 | 223 |
+| `poly_balanced/k05` | 331 | 331 | 331 | 227 | 279 |
+| `poly_balanced/k03` | **344** | **344** | **344** | 249 | 279 |
+| `poly_balanced/k02` | 208 | 208 | 208 | 157 | 206 |
+| `mono_compact/k10-15` | 63 | 63 | 63 | 54 | 78 |
+| `mono_compact/k05` | 48 | 48 | 48 | 40 | 54 |
+| `mono_compact/k03` | 9 | 9 | 9 | 40 | 30 |
+| `mono_compact/k02` | **5** | **5** | **5** | 33 | 38 |
+
+Trois lectures :
+- **`n` est non monotone en k**, pic à **k=3** (344) — à k=2 le contour est en
+  grande partie le bord *droit* de la mosaïque, à k=10-15 les fragments sont
+  petits ; c'est au milieu que la part de bord interne zigzaguant culmine.
+- **`mono_compact` à k≤3 : 5 et 9 sommets** = des rectangles, littéralement. Le
+  signal d'appariement géométrique y est mort (confirmation chiffrée que ces deux
+  cases sont des **bornes basses d'ablation**, pas des configs d'entraînement).
+- **L3 fait *baisser* `n_max`** (l'érosion arrondit et raccourcit les contours),
+  **L4 le fait remonter** (les trous ajoutent du contour). Ce n'est pas une
+  anomalie : reco-B travaille sur le contour **déjà dégradé**.
+
+**Pour un `n_max` joint** (contrat dense transférable) : **344** couvre les 8
+datasets, et les fragments **RePAIR réels** plafonnent à 291 après reco-B ε=1 % —
+donc `collate.py --n-max 344` suffit pour LEGO **et** réel. (L'ancien repère 304,
+mesuré sur un pilote de 100 mosaïques, est trop bas à l'échelle 5 000.)
 
 ### Prise en main (récupérer un palier et lire les tenseurs)
 
