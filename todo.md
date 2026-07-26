@@ -53,6 +53,7 @@
 ## À faire
 
 ### Forge (ICI)
+- 🟡 **RUN WEEK-END — EN COURS (7/8 en ligne au 26/07 18:45)** : `poly_balanced/{k10-15,k05,k03,k02}` ✅ · `mono_compact/{k10-15,k05,k03}` ✅ · `mono_compact/k02` en forge (~68 %). Restent ensuite le collate+upload de k02 puis le renommage HF `balanced/` → `LEGACY_DO_NOT_USE/`. Résilience 3 étages (resume du script + `weekend_babysitter.sh` détaché + watchdog Claude) : 2 kills de process et 1 faille de resume rattrapés, **0 perte de donnée**. Détail initial ↓
 - 🔴 **RUN WEEK-END (vendredi matin → lundi/mardi)** : matrice COMPLÈTE = **8 datasets / 200 000 instances**, hiérarchie **`<grille_croissance>/<k>/<palier>`** (`poly_balanced/` + `mono_compact/` × `k02·k03·k05·k10-15` × `L0…L4`, idem sur HF), pipeline séquentiel générer→collate→upload→nettoyage local, resume total, garde-fou 70 Go. Script prêt et testé bout-en-bout : `scripts/tools/weekend_full_matrix.sh`. ✅ **HF connecté** (token write `4datasetLEGO2HERO`). Lancement vendredi : `caffeinate -i zsh scripts/tools/weekend_full_matrix.sh > output/weekend.log 2>&1 &` (couvercle ouvert + secteur). Inclut la régénération du 25k (= `poly_balanced/k10-15`) et le **renommage** du legacy HF `balanced/` → `LEGACY_DO_NOT_USE/` (conservé, pas supprimé). Résout aussi la re-mesure des `n_max`
 - 🚧 **DAFNE B** : `--frag-distribution {voronoi, clusters}` (découpe à tailles inégales = durcissement)
 - 🚧 **DAFNE D** : parasites/distracteurs (fragments d'autres mosaïques à rejeter) — plus tard

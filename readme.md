@@ -1,5 +1,81 @@
 # lego2hero
 
+## Mise à jour — juillet 2026 (ce qui a changé depuis la v1)
+
+La v1 (juin 2026) publiait **un seul dataset** (`balanced/`, 5 000 mosaïques ×
+5 paliers = 25 000 instances). Elle est **dépréciée** : un bug d'encodage
+géométrique (ci-dessous) y a faussé tout le signal de forme. La v2 la remplace
+par une **matrice complète de 8 datasets appariés** (200 000 instances).
+
+| # | changement | avant (v1) | après (v2) |
+|---|---|---|---|
+| 1 | **Budget de simplification du contour** | ~~budget en **nombre de sommets** : on garde d'abord **tous les sommets reflex**, puis on complète par des convexes jusqu'à `n_target` (16-24)~~ ❌ **abandonné** — `#reflex` (méd. 58) ≥ `n_target` dans **100 %** des fragments ⇒ **aucun convexe n'était jamais gardé**, **21 % d'aire perdue en médiane** | budget sur la **perte d'aire** (`--max-area-loss`, **ε = 1 %**), `n` en **sortie** ; Visvalingam-Whyatt restreint aux convexes ⇒ perte **0,94 % médiane / 1,00 % max** |
+| 2 | **Nombre de fragments** (DAFNE A) | k = 10-15 uniquement | axe ouvert : **k = 2 · 3 · 5 · 10-15** (`--n-frag-min/max`) — la difficulté est dans les **arêtes** (1,0 → 27,1 par mosaïque) |
+| 3 | **Motif de découpe** | `balanced` seul | `balanced` · `compact` · **`ultracompact`** (mosaïque forgée en tuiles 1×1 via `remono.py` + croissance compacte) |
+| 4 | **Contrat de données GNN** | dense seul (pad `n_max` + masque) | **2 contrats dans le même `.npz`** : dense **et** ragged (`verts_flat` + `node_offsets`, sans `n_max`) → encodeur agnostique à la longueur possible (PointNet / Deep Sets) |
+| 5 | **`n_max` cross-datasets** | par palier, non comparable | `collate.py --n-max` (n_max **joint**) ; **304** couvre LEGO **et** RePAIR réel |
+| 6 | **Fragments manquants** (DAFNE C) | compte absolu 0-2 (à k=2, L4 ne laissait qu'**un** fragment) | plafond **relatif** automatique `round(0.15·k)`, surchargeable par `--missing-max` |
+| 7 | **Dataset publié** | `balanced/` | hiérarchie `<grille_croissance>/<k>/<palier>` — cf. section suivante ; l'ancien devient **`LEGACY_DO_NOT_USE/`** |
+
+⚠️ **Tous les `n_max` publiés avant le 23/07/2026 sont caducs** (mesurés sur des
+polygones faux). La hiérarchie entre configs tient, les valeurs absolues sont
+re-mesurées en v2.
+
+## Datasets publiés — [🤗 icimathieu/lego2hero-100mosaics](https://huggingface.co/datasets/icimathieu/lego2hero-100mosaics)
+
+**8 datasets appariés** : mêmes 5 000 peintures wikiart, mêmes seeds, seule la
+config change → les courbes score(difficulté) sont comparables à variance faible.
+
+```
+poly_balanced/     tuiles variables + BFS équilibré      ← la voie principale
+mono_compact/      tuiles 1×1 + croissance compacte      ← « ultracompact » (peu de sommets)
+  └─ k02 · k03 · k05 · k10-15        nombre de fragments (DAFNE A)
+       └─ L0_explode … L4_strong     1 tar.gz + 1 gnn_meta.json par palier
+
+LEGACY_DO_NOT_USE/   ancien `balanced/` (v1) — ⛔ NE PAS ENTRAÎNER DESSUS
+```
+
+- **`LEGACY_DO_NOT_USE/`** = le dataset de juin, **conservé pour archive
+  uniquement**. Il a été produit avec l'encodage bugué (perte d'aire **21 %
+  médiane, p95 85 %, non bornée**) : `polygon_n_canonical` et `side_features` y
+  décrivent des formes fausses. Son successeur corrigé est
+  **`poly_balanced/k10-15/`**. Seuls les 7 scalaires `gnn_input` y restent valides.
+- **`mono_compact/k02` et `k03`** sont volontairement **dégénérés** (fragments
+  quasi rectangulaires, signal d'appariement géométrique mort) : ils sont inclus
+  comme **bornes basses d'ablation**, pas comme configs d'entraînement.
+- À **k=2** la prédiction de lien est dégénérée par construction (1 seule arête
+  possible, toujours présente ⇒ F1 = 1,0 pour n'importe quel modèle) : seule la
+  **pose** (Q_pos) y est mesurable.
+
+### Prise en main (récupérer un palier et lire les tenseurs)
+
+```python
+from huggingface_hub import hf_hub_download
+p = hf_hub_download("icimathieu/lego2hero-100mosaics",
+                    "poly_balanced/k10-15/L2_rotation.tar.gz", repo_type="dataset")
+# tar xzf <p> -C data/     → data/L2_rotation/mosaic_<id>/…
+```
+
+```python
+import numpy as np
+z = np.load("data/L2_rotation/mosaic_<id>/gnn_ready.npz")
+
+# (A) contrat DENSE — tenseurs à dimension fixe
+z["gnn_input"]            # (N, 7)        area, perimeter, R, G, B, bbox_w, bbox_h
+z["polygon_n_canonical"]  # (N, n_max, 2) paddé à 0 au-delà de n_sides
+z["side_features"]        # (N, n_max, 5) [length, angle, R, G, B] par côté
+z["valid_mask"]           # (N, n_max)    1 = vrai sommet, 0 = padding
+
+# (B) contrat RAGGED — mêmes données, sans n_max ni padding
+off = z["node_offsets"]                    # (N+1,)
+verts_i = z["verts_flat"][off[i]:off[i+1]] # (n_i, 2)  polygone du nœud i
+sides_i = z["sides_flat"][off[i]:off[i+1]] # (n_i, 5)
+```
+
+`node_id` (`(N,)`) fait le lien avec `graph_fragments.json` (entrée) et
+`graph_complete.json` (cible : arêtes + poses). **Ne jamais donner
+`graph_complete.json` ni `gt_layout.json` en entrée** — ce sont les cibles.
+
 ## Pipeline
 
 ```
@@ -205,8 +281,10 @@ et sont donc retirés **gratuitement** (c'est le gros du bruit de contour LEGO).
 Le plancher dur de `n` reste **#reflex**, atteint automatiquement.
 
 > ⚠️ **Correctif du 23/07/2026 — invalide les `n_max` publiés avant cette date.**
-> L'implémentation précédente budgétait le **nombre de sommets** (`--n-sides-min/max`,
-> 16-24) en amorçant l'ensemble à garder avec tous les reflex. Comme `#reflex`
+> ~~L'implémentation précédente budgétait le **nombre de sommets**
+> (`--n-sides-min/max`, 16-24) en amorçant l'ensemble à garder avec tous les
+> sommets reflex, puis en complétant par les convexes jusqu'au quota.~~ ❌ **Étape
+> supprimée.** Comme `#reflex`
 > (médiane **58** sur LEGO) ≥ `n_target` dans **100 %** des fragments, la boucle
 > d'ajout des convexes sortait immédiatement : **aucun sommet convexe n'était
 > jamais gardé**. L'invariant ⊆ raw tenait (pas d'aire fantôme) mais **l'ampleur
@@ -226,6 +304,7 @@ lego2hero/
 │   │   ├── mosaic.py           # quantif Lab → packing glouton → rendu tuiles + joints
 │   │   ├── cli.py · batch.py   # 1 image / dossier d'images
 │   │   ├── wikiart.py          # source d'images : huggan/wikiart en streaming
+│   │   ├── remono.py           # re-forge exacte en tuiles 1×1 depuis piece_grid.json (uuid conservés)
 │   │   └── palette.py          # 82 couleurs LEGO (bricklink, gris filtrés)
 │   ├── mosaic2fragments/       # mosaïque → fragments → YOLO-Seg + graphes GNN
 │   │   ├── forge_dataset.py    # pipeline principal (joints → pièces → fragments → GT)
@@ -233,13 +312,15 @@ lego2hero/
 │   │   └── batch.py · visualize.py
 │   ├── features/               # post-YOLO / pré-GNN — PARTAGÉ synthétique↔réel
 │   │   ├── fragment_features.py   # reco-B + PCA canonical + side_features + gnn_input
-│   │   └── collate.py             # pad n_max + masque → gnn_ready.npz
+│   │   └── collate.py             # → gnn_ready.npz : dense (pad n_max + masque) ET ragged (verts_flat + node_offsets)
 │   └── tools/
-│       └── hf_upload.py        # upload d'un dossier vers le HuggingFace Hub (dataset)
+│       ├── hf_upload.py        # upload d'un dossier vers le HuggingFace Hub (dataset)
+│       ├── hf_export_tars.py   # export HF en tar.gz par palier (resume)
+│       └── weekend_full_matrix.sh · weekend_babysitter.sh   # run de la matrice 8 datasets (séquentiel, resume, nettoyage disque)
 ├── todo.md                 # statut concis (historique + à faire)
 ├── LICENSE                 # MIT
 └── output/                 # ⚠️ GÉNÉRÉ — gitignoré, hors du dépôt (données lourdes)
-    └── <frag-distribution>/<palier>/mosaic_<id>/   ← structure détaillée ci-dessous
+    └── <grille_croissance>/<k>/<palier>/mosaic_<id>/   ← structure détaillée ci-dessous
 ```
 
 ## Structure d'un sous-dossier de mosaïque
@@ -337,3 +418,6 @@ journal de bord) : le casque de Sutton Hoo = 18 mois d'un conservateur pour ~500
 fragments ; Pompéi = ~10 000 fragments en entrepôt, la GT RePAIR (~1 000 pièces)
 a demandé des années ; Akrotiri = des pans entiers non assemblés 50 ans après le
 début des fouilles.
+
+
+hhhhhh

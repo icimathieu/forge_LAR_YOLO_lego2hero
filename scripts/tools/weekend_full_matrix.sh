@@ -103,8 +103,23 @@ for SPEC in "${DATASETS[@]}"; do
   OUT=output/wk/$NAME
   SRC=$OUT/$DIST
   echo "=== [$NAME] début ($(date '+%d/%m %H:%M')) · libre $(free_gb) Go"
-  if (( $(free_gb) < MIN_FREE_GB )); then
-    echo "ABORT : moins de $MIN_FREE_GB Go libres — nettoyer avant de relancer."; exit 1
+  # RESUME inter-datasets (fix 26/07 00:xx) : un dataset dont les 5 tars sont
+  # déjà sur le repo est SAUTÉ (sinon toute relance re-forgerait les datasets
+  # finis dont le local a été nettoyé).
+  DEJA=$($PY -c 'import sys
+from huggingface_hub import HfApi
+api = HfApi(); name = sys.argv[1]
+ls = ["L0_explode","L1_translation","L2_rotation","L3_light","L4_strong"]
+print("OK" if all(api.file_exists("icimathieu/lego2hero-100mosaics",
+      f"{name}/{L}.tar.gz", repo_type="dataset") for L in ls) else "NON")' "$NAME")
+  if [[ "$DEJA" == "OK" ]]; then
+    echo "=== [$NAME] déjà intégralement sur HF — SAUTÉ"; continue
+  fi
+  # Garde-fou disque : seulement pour un dataset qui démarre À NEUF (dossier
+  # absent = ~50 Go à créer). Un dataset en cours (dossier présent) passe :
+  # sa donnée est déjà sur le disque, l'export n'a besoin que d'~1 tar.
+  if [[ ! -d $OUT ]] && (( $(free_gb) < MIN_FREE_GB )); then
+    echo "ABORT : moins de $MIN_FREE_GB Go libres pour un dataset neuf — nettoyer avant de relancer."; exit 1
   fi
 
   echo "--- forge (25 000 instances, resume)"
