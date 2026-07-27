@@ -3,22 +3,21 @@
 ## Mise à jour — juillet 2026 (ce qui a changé depuis la v1)
 
 La v1 (juin 2026) publiait **un seul dataset** (`balanced/`, 5 000 mosaïques ×
-5 paliers = 25 000 instances). Elle est **dépréciée** : un bug d'encodage
-géométrique (ci-dessous) y a faussé tout le signal de forme. La v2 la remplace
-par une **matrice complète de 8 datasets appariés** (200 000 instances).
+5 paliers = 25 000 instances). Elle est **archivée** : une erreur d'encodage
+géométrique (ci-dessous) a tout faussé. La v2 la remplace
+par **8 datasets ** (200 000 instances).
 
 | # | changement | avant (v1) | après (v2) |
 |---|---|---|---|
-| 1 | **Budget de simplification du contour** | ~~budget en **nombre de sommets** : on garde d'abord **tous les sommets reflex**, puis on complète par des convexes jusqu'à `n_target` (16-24)~~ ❌ **abandonné** — `#reflex` (méd. 58) ≥ `n_target` dans **100 %** des fragments ⇒ **aucun convexe n'était jamais gardé**, **21 % d'aire perdue en médiane** | budget sur la **perte d'aire** (`--max-area-loss`, **ε = 1 %**), `n` en **sortie** ; Visvalingam-Whyatt restreint aux convexes ⇒ perte **0,94 % médiane / 1,00 % max** |
-| 2 | **Nombre de fragments** (DAFNE A) | k = 10-15 uniquement | axe ouvert : **k = 2 · 3 · 5 · 10-15** (`--n-frag-min/max`) — la difficulté est dans les **arêtes** (1,0 → 27,1 par mosaïque) |
+| 1 | **Budget de simplification du contour** | ~~budget en **nombre de sommets** : on garde d'abord **tous les sommets reflex**, puis on complète par des convexes jusqu'à `n_target` (16-24)~~ ❌ **abandonné** — `#reflex` (méd. 58) ≥ `n_target` dans **100 %** des fragments --> **aucun convexe n'était jamais gardé**, **21 % d'aire perdue en médiane** | budget sur la **perte d'aire** (`--max-area-loss`, **ε = 1 %**), `n` en **sortie** ; Visvalingam-Whyatt restreint aux convexes ⇒ perte **0,94 % médiane / 1,00 % max** |
+| 2 | **Nombre de fragments** (DAFNE A) | k = 10-15 uniquement | axe ouvert : **k = 2 / 3 / 5 / 10-15** (`--n-frag-min/max`) |
 | 3 | **Motif de découpe** | `balanced` seul | `balanced` · `compact` · **`ultracompact`** (mosaïque forgée en tuiles 1×1 via `remono.py` + croissance compacte) |
-| 4 | **Contrat de données GNN** | dense seul (pad `n_max` + masque) | **2 contrats dans le même `.npz`** : dense **et** ragged (`verts_flat` + `node_offsets`, sans `n_max`) → encodeur agnostique à la longueur possible (PointNet / Deep Sets) |
+| 4 | **mode de données GNN** | dense seul (pad `n_max` + masque) | **2 modes dans le même `.npz`** : dense **et** ragged (`verts_flat` + `node_offsets`, sans `n_max`) → encodeur agnostique à la longueur possible (PointNet / Deep Sets) |
 | 5 | **Fragments manquants** (DAFNE C) | compte absolu 0-2 (à k=2, L4 ne laissait qu'**un** fragment) | plafond **relatif** automatique `round(0.15·k)`, surchargeable par `--missing-max` |
-| 6 | **Dataset publié** | `balanced/` | hiérarchie `<grille_croissance>/<k>/<palier>` — cf. section suivante ; l'ancien devient **`LEGACY_DO_NOT_USE/`** |
 
-## Datasets publiés — [🤗 icimathieu/lego2hero-100mosaics](https://huggingface.co/datasets/icimathieu/lego2hero-100mosaics)
+## Datasets  — [🤗 icimathieu/lego2hero-100mosaics](https://huggingface.co/datasets/icimathieu/lego2hero-100mosaics)
 
-**8 datasets appariés** : mêmes 5 000 peintures wikiart, mêmes seeds, seule la
+**8 datasets** : mêmes 5 000 peintures wikiart, mêmes seeds, seule la
 config change.
 
 ```
@@ -27,7 +26,7 @@ mono_compact/      tuiles 1×1 + croissance compacte      ← « ultracompact »
   └─ k02 · k03 · k05 · k10-15        nombre de fragments (DAFNE A)
        └─ L0_explode … L4_strong     1 tar.gz + 1 gnn_meta.json par palier
 
-LEGACY_DO_NOT_USE/   ancien `balanced/` (v1) — ⛔ NE PAS ENTRAÎNER DESSUS
+LEGACY_DO_NOT_USE/   ancien `balanced/` (v1) 
 ```
 
 - **`LEGACY_DO_NOT_USE/`** = le dataset de juin, **conservé pour archive
@@ -39,48 +38,6 @@ LEGACY_DO_NOT_USE/   ancien `balanced/` (v1) — ⛔ NE PAS ENTRAÎNER DESSUS
   comme **bornes basses d'ablation**, pas comme configs d'entraînement.
 - À **k=2** la prédiction de lien est dégénérée par construction : une seule arête
   possible, toujours présente.
-
-### `n_max` re-mesurés (v2, 5 000 mosaïques par case)
-
-| dataset | L0 | L1 | L2 | L3 | L4 |
-|---|---:|---:|---:|---:|---:|
-| `poly_balanced/k10-15` | 224 | 224 | 224 | 169 | 223 |
-| `poly_balanced/k05` | 331 | 331 | 331 | 227 | 279 |
-| `poly_balanced/k03` | **344** | **344** | **344** | 249 | 279 |
-| `poly_balanced/k02` | 208 | 208 | 208 | 157 | 206 |
-| `mono_compact/k10-15` | 63 | 63 | 63 | 54 | 78 |
-| `mono_compact/k05` | 48 | 48 | 48 | 40 | 54 |
-| `mono_compact/k03` | 9 | 9 | 9 | 40 | 30 |
-| `mono_compact/k02` | **5** | **5** | **5** | 33 | 38 |
-
-**Pour un `n_max` joint** (contrat dense transférable) : **344** couvre les 8
-datasets, et les fragments **RePAIR réels** plafonnent à 291 après reco-B ε=1 % —
-donc `collate.py --n-max 344` suffit pour LEGO **et** réel.
-
-### Prise en main (récupérer un palier et lire les tenseurs)
-
-```python
-from huggingface_hub import hf_hub_download
-p = hf_hub_download("icimathieu/lego2hero-100mosaics",
-                    "poly_balanced/k10-15/L2_rotation.tar.gz", repo_type="dataset")
-# tar xzf <p> -C data/     → data/L2_rotation/mosaic_<id>/…
-```
-
-```python
-import numpy as np
-z = np.load("data/L2_rotation/mosaic_<id>/gnn_ready.npz")
-
-# (A) contrat DENSE — tenseurs à dimension fixe
-z["gnn_input"]            # (N, 7)        area, perimeter, R, G, B, bbox_w, bbox_h
-z["polygon_n_canonical"]  # (N, n_max, 2) paddé à 0 au-delà de n_sides
-z["side_features"]        # (N, n_max, 5) [length, angle, R, G, B] par côté
-z["valid_mask"]           # (N, n_max)    1 = vrai sommet, 0 = padding
-
-# (B) contrat RAGGED — mêmes données, sans n_max ni padding
-off = z["node_offsets"]                    # (N+1,)
-verts_i = z["verts_flat"][off[i]:off[i+1]] # (n_i, 2)  polygone du nœud i
-sides_i = z["sides_flat"][off[i]:off[i+1]] # (n_i, 5)
-```
 
 ## Pipeline
 
@@ -124,21 +81,13 @@ sides_i = z["sides_flat"][off[i]:off[i+1]] # (n_i, 5)
                            ▼                                  ▼
    ┌──────────  features  (post-YOLO / pré-GNN, PARTAGÉ synth.↔réel) ──────────┐
    │  masque → reco-B (budget ε de perte d'aire) + PCA canonical + gnn_input    │
-   │  → collate : 2 contrats dans gnn_ready.npz                                 │
+   │  → collate : 2 modes dans gnn_ready.npz                                 │
    │      (A) dense  = pad n_max + masque                                       │
    │      (B) ragged = verts_flat + node_offsets  (sans n_max)                  │
    └────────────────────────────────────┬──────────────────────────────────────┘
                                          ▼
-              encodeur de nœud (côté GNN, entraîné avec lui) :
-              (A) → tenseurs denses   (B) → PointNet/Deep Sets (agnostique)
-                                         ▼
-                                GNN  (réassemblage)
+                                     GNN/VLM
 ```
-
-<sub>¹ `ultracompact` = `compact` sur une mosaïque forgée en `--mode mono` (tuiles
-1×1). Les mono se régénèrent **exactement** depuis les `piece_grid.json`
-existants via `scripts/forge_LAR_2mosaic/remono.py` (mêmes couleurs, mêmes uuid →
-appariement conservé).</sub>
 
 `features` est **partagé** : sur le synthétique il consomme la GT, sur le réel il
 consomme les masques détectés par YOLO — même code.
@@ -160,13 +109,12 @@ Driver `scripts/mosaic2fragments/curriculum.py` → `output/<frag-distribution>/
 
 ### Les 5 paramètres de difficulté DAFNE
 
-**DAFNE** (*Digital Anastylosis of Frescoes challeNgE*, Univ. Pavie, PRL 2020) est
-un benchmark **synthétique** de réassemblage de fresques 2D.
+*Digital Anastylosis of Frescoes challeNgE*, Univ. Pavie, PRL 2020
 
 | DAFNE | ce que c'est | chez nous | statut |
 |---|---|---|---|
 | **A** — nb de fragments | plus de fragments = plus dur | `--n-frag-min/max` — historiquement figé à **10-15** ; configs **k=2/3/5** ajoutées (cf. tableau suivant) | ✅ |
-| **B** — distribution de découpe | tailles/formes des coupes | l'axe `--frag-distribution` : `balanced`/`compact`/`ultracompact` ✅ — `voronoi`/`clusters` (le vrai durcissement DAFNE B) ❌ | 🚧 partiel |
+| **B** — distribution de découpe | tailles/formes des coupes | l'axe `--frag-distribution` : `balanced`/`compact`/`ultracompact` ✅ — `voronoi`/`clusters` (le vrai durcissement DAFNE B) ❌ | todo partiel |
 | **C** — % de fragments manquants | pièces absentes de l'entrée | `--missing-min/max`, palier **L4**. Plafond automatique à **~15 % de k** (`round(0.15 · n_frag_max)`, surcharge par `--missing-max`) : notre `missing` est un compte absolu, DAFNE C un pourcentage | ✅ |
 | **D** — fragments parasites | pièces d'un autre objet à rejeter | — | ❌ |
 | **E** — érosion | bords rongés | `--erode-px-min/max`, **L3** = 1-2 px, **L4** = 2-6 px | ✅ |
@@ -177,7 +125,6 @@ aire totale plafonnée à 10 % du fragment) et l'axe **pose** (L0→L2).
 ### Nombre de fragments (DAFNE A)
 
 Axe **orthogonal** aux paliers et aux modes de découpe (`--n-frag-min/max`).
-Réduire k rend le **graphe** beaucoup plus facile sans rendre la **pose** triviale.
 
 Mesuré sur le pilote du 23/07 — **100 mosaïques wikiart identiques** pour les 4
 configs, `balanced`, reco-B corrigé (ε=1 %), 2 000 instances, 0 échec :
@@ -197,28 +144,9 @@ Axe **orthogonal** aux paliers de dégradation (sortie `output/<mode>/<palier>/`
 |---|---|---|---|
 | **balanced** | seeds farthest-point + BFS à priorité (le plus petit fragment grandit d'abord) | blobs d'aire ~égale | ✅ défaut |
 | **compact** | croissance à **périmètre minimal** : chaque fragment absorbe la pièce-frontière qui maximise le remplissage de sa bbox | bords + lisses, médiane sommets −15 % | ✅ |
-| **ultracompact** | ⚠️ **pas un algo différent** : c'est `compact` appliqué à une mosaïque forgée en **`--mode mono`** (tuiles 1×1). « L'ultra » vient de l'ENTRÉE, pas de la coupe | rectangulaires, **peu de sommets** (coupes droites sur grille régulière) | ✅ |
-| **voronoi** | k graines dispersées, pièce → graine la + proche | tailles **inégales**, bords irréguliers (**DAFNE B**) | 🚧 |
-| **clusters** | graines agglutinées | zones très/peu fragmentées (**DAFNE B**) | 🚧 |
-
-### Encodage géométrique — reco-B (`polygon_n`)
-
-Le contour brut d'un fragment (`polygon_raw`, sorti de `cv2.findContours`) est
-simplifié en `polygon_n`, qui est ce que voit le GNN. Deux garanties :
-
-- **`polygon_n ⊆ polygon_raw`** — on ne *gagne* jamais d'aire, on en perd (« comme
-  si les coins étaient ébréchés »). Les fragments réassemblés ne se chevauchent
-  donc **jamais** : ils laissent des jours. C'est le régime physiquement
-  réalisable.
-- **Budget sur la PERTE D'AIRE** (`--max-area-loss`, défaut **ε = 1 %**).
-
-L'algorithme est **Visvalingam-Whyatt** (1993) *restreint aux sommets convexes* :
-on retire itérativement le sommet dont le triangle (préc., lui, suiv.) a la plus
-petite aire, tant que la perte cumulée reste ≤ ε. Seuls les **convexes** sont
-retirables — retirer un sommet **reflex** pontifierait une concavité et
-**re-gagnerait** de l'aire. Les sommets ~colinéaires ont un triangle d'aire nulle
-et sont donc retirés **gratuitement** (c'est le gros du bruit de contour LEGO).
-Le plancher dur de `n` reste **#reflex**, atteint automatiquement.
+| **ultracompact** | **pas vraiment un algo différent** : c'est `compact` appliqué à une mosaïque forgée en **`--mode mono`** (tuiles 1×1). « L'ultra » vient de l'ENTRÉE, pas de la coupe | rectangulaires, **peu de sommets** (coupes droites sur grille régulière) | ✅ |
+| **voronoi** | k graines dispersées, pièce → graine la + proche | tailles **inégales**, bords irréguliers (**DAFNE B**) | todo |
+| **clusters** | graines agglutinées | zones très/peu fragmentées (**DAFNE B**) | todo |
 
 ## Arborescence
 
